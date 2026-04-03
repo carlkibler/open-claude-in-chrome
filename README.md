@@ -2,7 +2,9 @@
 
 **Claude in Chrome, fully open source. No domain blocklist. Any Chromium browser.**
 
-The official [Claude in Chrome](https://chromewebstore.google.com/detail/claude/fcoeoabgfenejglbffodgkkbkcdhcgfn) extension gives Claude Code full browser automation. Open Claude in Chrome is a clean-room reimplementation that removes the restrictions while maintaining 100% feature and performance parity.
+The official [Claude in Chrome](https://code.claude.com/docs/en/chrome) extension gives Claude Code full browser automation. Open Claude in Chrome is a clean-room reimplementation that removes the restrictions while maintaining 100% feature and performance parity.
+
+> **Technical deep dive:** [Reverse-Engineering Claude's Browser Extension](https://www.noemica.io/blog/reverse-engineered-claude-in-chrome)
 
 ## What's Different
 
