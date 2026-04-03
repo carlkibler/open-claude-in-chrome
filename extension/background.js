@@ -480,63 +480,32 @@ const toolHandlers = {
       case "left_click": {
         if (!coordinate) return { content: [{ type: "text", text: "coordinate is required for left_click" }] };
         await mouseClick(tabId, coordinate[0], coordinate[1], { modifiers });
-        await sleep(100);
-        const { base64 } = await takeScreenshot(tabId);
-        return {
-          content: [
-            { type: "text", text: `Clicked at (${coordinate[0]}, ${coordinate[1]})` },
-            { type: "image", data: base64, mimeType: "image/jpeg" },
-          ],
-        };
+        return { content: [{ type: "text", text: `Clicked at (${coordinate[0]}, ${coordinate[1]})` }] };
       }
 
       case "right_click": {
         if (!coordinate) return { content: [{ type: "text", text: "coordinate is required for right_click" }] };
         await mouseClick(tabId, coordinate[0], coordinate[1], { button: "right", modifiers });
-        const { base64 } = await takeScreenshot(tabId);
-        return {
-          content: [
-            { type: "text", text: `Right-clicked at (${coordinate[0]}, ${coordinate[1]})` },
-            { type: "image", data: base64, mimeType: "image/jpeg" },
-          ],
-        };
+        return { content: [{ type: "text", text: `Right-clicked at (${coordinate[0]}, ${coordinate[1]})` }] };
       }
 
       case "double_click": {
         if (!coordinate) return { content: [{ type: "text", text: "coordinate is required for double_click" }] };
         await mouseClick(tabId, coordinate[0], coordinate[1], { clickCount: 2, modifiers });
-        const { base64 } = await takeScreenshot(tabId);
-        return {
-          content: [
-            { type: "text", text: `Double-clicked at (${coordinate[0]}, ${coordinate[1]})` },
-            { type: "image", data: base64, mimeType: "image/jpeg" },
-          ],
-        };
+        return { content: [{ type: "text", text: `Double-clicked at (${coordinate[0]}, ${coordinate[1]})` }] };
       }
 
       case "triple_click": {
         if (!coordinate) return { content: [{ type: "text", text: "coordinate is required for triple_click" }] };
         await mouseClick(tabId, coordinate[0], coordinate[1], { clickCount: 3, modifiers });
-        const { base64 } = await takeScreenshot(tabId);
-        return {
-          content: [
-            { type: "text", text: `Triple-clicked at (${coordinate[0]}, ${coordinate[1]})` },
-            { type: "image", data: base64, mimeType: "image/jpeg" },
-          ],
-        };
+        return { content: [{ type: "text", text: `Triple-clicked at (${coordinate[0]}, ${coordinate[1]})` }] };
       }
 
       case "hover": {
         if (!coordinate) return { content: [{ type: "text", text: "coordinate is required for hover" }] };
         await dispatchMouse(tabId, "mouseMoved", coordinate[0], coordinate[1], { modifiers });
         await sleep(200);
-        const { base64 } = await takeScreenshot(tabId);
-        return {
-          content: [
-            { type: "text", text: `Hovered at (${coordinate[0]}, ${coordinate[1]})` },
-            { type: "image", data: base64, mimeType: "image/jpeg" },
-          ],
-        };
+        return { content: [{ type: "text", text: `Hovered at (${coordinate[0]}, ${coordinate[1]})` }] };
       }
 
       case "type": {
@@ -547,14 +516,7 @@ const toolHandlers = {
           await cdp(tabId, "Input.insertText", { text: char });
           await sleep(10);
         }
-        await sleep(100);
-        const { base64 } = await takeScreenshot(tabId);
-        return {
-          content: [
-            { type: "text", text: `Typed "${args.text.substring(0, 50)}${args.text.length > 50 ? "..." : ""}"` },
-            { type: "image", data: base64, mimeType: "image/jpeg" },
-          ],
-        };
+        return { content: [{ type: "text", text: `Typed "${args.text.substring(0, 50)}${args.text.length > 50 ? "..." : ""}"` }] };
       }
 
       case "key": {
@@ -583,13 +545,7 @@ const toolHandlers = {
             await sleep(30);
           }
         }
-        const { base64 } = await takeScreenshot(tabId);
-        return {
-          content: [
-            { type: "text", text: `Pressed key(s): ${args.text}` },
-            { type: "image", data: base64, mimeType: "image/jpeg" },
-          ],
-        };
+        return { content: [{ type: "text", text: `Pressed ${repeat} key${repeat > 1 ? "s" : ""}: ${args.text}` }] };
       }
 
       case "scroll": {
@@ -631,25 +587,13 @@ const toolHandlers = {
           });
         }
         await sleep(300);
-        const { base64 } = await takeScreenshot(tabId);
-        return {
-          content: [
-            { type: "text", text: `Scrolled to target` },
-            { type: "image", data: base64, mimeType: "image/jpeg" },
-          ],
-        };
+        return { content: [{ type: "text", text: `Scrolled to target` }] };
       }
 
       case "wait": {
         const duration = Math.min(args.duration || 1, 30);
         await sleep(duration * 1000);
-        const { base64 } = await takeScreenshot(tabId);
-        return {
-          content: [
-            { type: "text", text: `Waited ${duration} seconds` },
-            { type: "image", data: base64, mimeType: "image/jpeg" },
-          ],
-        };
+        return { content: [{ type: "text", text: `Waited for ${duration} second${duration !== 1 ? "s" : ""}` }] };
       }
 
       case "left_click_drag": {
@@ -671,14 +615,7 @@ const toolHandlers = {
           await sleep(20);
         }
         await dispatchMouse(tabId, "mouseReleased", ex, ey, { button: "left", modifiers });
-        await sleep(100);
-        const { base64 } = await takeScreenshot(tabId);
-        return {
-          content: [
-            { type: "text", text: `Dragged from (${sx}, ${sy}) to (${ex}, ${ey})` },
-            { type: "image", data: base64, mimeType: "image/jpeg" },
-          ],
-        };
+        return { content: [{ type: "text", text: `Dragged from (${sx}, ${sy}) to (${ex}, ${ey})` }] };
       }
 
       case "zoom": {
