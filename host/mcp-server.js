@@ -237,35 +237,30 @@ const server = new McpServer({
 });
 
 // Pre-validation arg coercion: fix common Claude mistakes before zod sees them.
-// The schema must advertise z.number() for tabId (matching the official extension),
+// The schema advertises z.number() for tabId (matching the official extension),
 // but Claude sometimes sends strings or serializes arrays as strings.
-// We intercept the raw request and coerce BEFORE the SDK runs zod validation.
+// We wrap every setRequestHandler call so that any handler receiving a request
+// with params.arguments gets those arguments coerced before zod validation.
 {
   const origSetRequestHandler = server.server.setRequestHandler.bind(server.server);
-  let callToolHandler = null;
   server.server.setRequestHandler = function(schema, handler) {
-    // Intercept the CallToolRequest handler
-    if (schema?.method === "tools/call" || schema?.properties?.method?.const === "tools/call") {
-      callToolHandler = handler;
-      return origSetRequestHandler(schema, async (request, extra) => {
-        // Coerce args before validation
-        const args = request.params.arguments;
-        if (args) {
-          if (typeof args.tabId === "string") args.tabId = Number(args.tabId);
-          if (typeof args.coordinate === "string") {
-            try { args.coordinate = JSON.parse(args.coordinate); } catch {}
-          }
-          if (typeof args.start_coordinate === "string") {
-            try { args.start_coordinate = JSON.parse(args.start_coordinate); } catch {}
-          }
-          if (typeof args.region === "string") {
-            try { args.region = JSON.parse(args.region); } catch {}
-          }
+    return origSetRequestHandler(schema, async (request, extra) => {
+      // Coerce tool call arguments if present
+      const args = request?.params?.arguments;
+      if (args) {
+        if (typeof args.tabId === "string") args.tabId = Number(args.tabId);
+        if (typeof args.coordinate === "string") {
+          try { args.coordinate = JSON.parse(args.coordinate); } catch {}
         }
-        return handler(request, extra);
-      });
-    }
-    return origSetRequestHandler(schema, handler);
+        if (typeof args.start_coordinate === "string") {
+          try { args.start_coordinate = JSON.parse(args.start_coordinate); } catch {}
+        }
+        if (typeof args.region === "string") {
+          try { args.region = JSON.parse(args.region); } catch {}
+        }
+      }
+      return handler(request, extra);
+    });
   };
 }
 
