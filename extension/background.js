@@ -469,9 +469,17 @@ const toolHandlers = {
     switch (action) {
       case "screenshot": {
         const { base64, imageId } = await takeScreenshot(tabId);
+        // Get viewport dimensions for the response message
+        let dims = "";
+        try {
+          const vp = await cdp(tabId, "Runtime.evaluate", {
+            expression: "window.innerWidth + 'x' + window.innerHeight",
+          });
+          if (vp?.result?.value) dims = vp.result.value;
+        } catch {}
         return {
           content: [
-            { type: "text", text: `Screenshot taken. Image ID: ${imageId}` },
+            { type: "text", text: `Successfully captured screenshot (${dims}, jpeg) - ID: ${imageId}` },
             { type: "image", data: base64, mimeType: "image/jpeg" },
           ],
         };
