@@ -226,9 +226,15 @@
         if (!append(line + "\n")) return;
       }
 
-      // Recurse children
+      // Recurse children (including shadow DOM)
+      const nextIndent = shouldShow && visible ? indent + "  " : indent;
+      if (el.shadowRoot) {
+        for (const child of el.shadowRoot.children) {
+          walk(child, depth + 1, nextIndent);
+        }
+      }
       for (const child of el.children) {
-        walk(child, depth + 1, shouldShow && visible ? indent + "  " : indent);
+        walk(child, depth + 1, nextIndent);
       }
     }
 
@@ -280,7 +286,20 @@
   function findElements(query) {
     const q = query.toLowerCase();
     const results = [];
-    const all = document.querySelectorAll("*");
+
+    // Collect all elements including those inside shadow roots
+    function collectAll(root) {
+      const elements = [];
+      for (const el of root.querySelectorAll("*")) {
+        elements.push(el);
+        if (el.shadowRoot) {
+          elements.push(...collectAll(el.shadowRoot));
+        }
+      }
+      return elements;
+    }
+
+    const all = collectAll(document);
 
     for (const el of all) {
       if (results.length >= 20) break;

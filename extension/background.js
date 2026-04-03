@@ -307,13 +307,30 @@ const MAX_SCREENSHOT_HEIGHT = 800;
 async function takeScreenshot(tabId) {
   await ensureAttached(tabId);
 
-  // Always use JPEG — PNG on retina displays can be 5-10MB
+  // Get the layout metrics so we know the CSS viewport size and device pixel ratio.
+  // Screenshots are captured at native device resolution (e.g., 2560x1600 on Retina),
+  // but CDP Input events use CSS coordinates (e.g., 1280x800). We need to either:
+  // 1. Downscale the screenshot to match CSS coordinates, or
+  // 2. Tell Claude the coordinate space.
+  // We do both: capture at CSS viewport size by specifying a clip with scale=1,
+  // which forces CDP to return a 1:1 CSS-pixel screenshot regardless of DPR.
+  const { layoutViewport } = await cdp(tabId, "Page.getLayoutMetrics");
+  const viewportWidth = layoutViewport.clientWidth;
+  const viewportHeight = layoutViewport.clientHeight;
+
+  // Capture at exactly CSS viewport size (scale: 1 overrides device pixel ratio)
   const result = await cdp(tabId, "Page.captureScreenshot", {
     format: "jpeg",
     quality: 55,
     optimizeForSpeed: true,
     captureBeyondViewport: false,
-    clip: undefined, // viewport only
+    clip: {
+      x: 0,
+      y: 0,
+      width: viewportWidth,
+      height: viewportHeight,
+      scale: 1,
+    },
   });
   let base64 = result.data;
 
@@ -324,6 +341,13 @@ async function takeScreenshot(tabId) {
       quality: 30,
       optimizeForSpeed: true,
       captureBeyondViewport: false,
+      clip: {
+        x: 0,
+        y: 0,
+        width: viewportWidth,
+        height: viewportHeight,
+        scale: 1,
+      },
     });
     base64 = smaller.data;
   }
@@ -336,7 +360,7 @@ async function takeScreenshot(tabId) {
     screenshotStore.delete(keys.shift());
   }
 
-  return { base64, imageId };
+  return { base64, imageId, viewportWidth, viewportHeight };
 }
 
 // --- Mouse helpers ---
@@ -457,10 +481,10 @@ const toolHandlers = {
 
     switch (action) {
       case "screenshot": {
-        const { base64, imageId } = await takeScreenshot(tabId);
+        const { base64, imageId, viewportWidth, viewportHeight } = await takeScreenshot(tabId);
         return {
           content: [
-            { type: "text", text: `Screenshot taken. Image ID: ${imageId}` },
+            { type: "text", text: `Screenshot taken (${viewportWidth}x${viewportHeight} viewport). Image ID: ${imageId}` },
             { type: "image", data: base64, mimeType: "image/jpeg" },
           ],
         };
