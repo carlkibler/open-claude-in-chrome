@@ -1,6 +1,6 @@
-# Unblocked Chrome — Integration Test Prompt
+# Open Claude in Chrome — Integration Test Prompt
 
-Copy and paste everything below the line into a new Claude Code session that has the `unblocked-chrome` MCP configured.
+Copy and paste everything below the line into a new Claude Code session that has the `open-claude-in-chrome` MCP configured.
 
 ---
 

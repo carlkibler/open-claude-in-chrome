@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// MCP Server for Unblocked Chrome extension.
+// MCP Server for Open Claude in Chrome extension.
 // Started by Claude Code via stdio MCP transport.
 // Also runs a TCP server for the native messaging host to connect.
 // Bridges MCP tool calls to the Chrome extension and returns results.
@@ -17,7 +17,7 @@ import { z } from "zod";
 const DEFAULT_PORT = 18765;
 
 function getPort() {
-  const configPath = path.join(os.homedir(), ".config", "unblocked-chrome", "config.json");
+  const configPath = path.join(os.homedir(), ".config", "open-claude-in-chrome", "config.json");
   try {
     const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
     return config.port || DEFAULT_PORT;
@@ -35,7 +35,7 @@ let requestIdCounter = 0;
 function sendToExtension(tool, args) {
   return new Promise((resolve, reject) => {
     if (!nativeHostSocket || nativeHostSocket.destroyed) {
-      reject(new Error("Browser extension is not connected. Make sure a supported browser (Chrome, Brave, or Edge) is running with the Unblocked Chrome extension installed and enabled."));
+      reject(new Error("Browser extension is not connected. Make sure a supported Chromium browser is running with the Open Claude in Chrome extension installed and enabled."));
       return;
     }
     const id = String(++requestIdCounter);
@@ -62,7 +62,7 @@ function sendToExtension(tool, args) {
 const TCP_PORT = getPort();
 
 // Write a pidfile so we can detect stale servers
-const pidfilePath = path.join(os.tmpdir(), `unblocked-chrome-mcp-${TCP_PORT}.pid`);
+const pidfilePath = path.join(os.tmpdir(), `open-claude-in-chrome-mcp-${TCP_PORT}.pid`);
 
 async function killStaleServer() {
   try {
@@ -232,7 +232,7 @@ async function callTool(toolName, args) {
 // --- MCP Server with all 18 tools ---
 
 const server = new McpServer({
-  name: "unblocked-chrome",
+  name: "open-claude-in-chrome",
   version: "1.0.0",
 });
 

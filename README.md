@@ -1,27 +1,57 @@
-# Unblocked Chrome for Claude
+# Open Claude in Chrome
 
-A Chrome extension + MCP server that gives Claude Code full browser automation — identical to [Claude in Chrome](https://chromewebstore.google.com/detail/claude/fcoeoabgfenejglbffodgkkbkcdhcgfn), but without domain restrictions. Also supports Brave Browser.
+**Claude in Chrome, fully open source. No domain blocklist. Any Chromium browser.**
+
+The official [Claude in Chrome](https://chromewebstore.google.com/detail/claude/fcoeoabgfenejglbffodgkkbkcdhcgfn) extension gives Claude Code full browser automation. Open Claude in Chrome is a clean-room reimplementation that removes the restrictions while maintaining 100% feature and performance parity.
+
+## What's Different
+
+| | Claude in Chrome | Open Claude in Chrome |
+|---|---|---|
+| **Domain blocklist** | 58 blocked domains across 11 categories | No blocklist. Navigate anywhere. |
+| **Browser support** | Chrome and Edge only | Any Chromium browser (Chrome, Edge, Brave, Arc, Opera, Vivaldi, etc.) |
+| **Source code** | Closed source | Open source (MIT) |
+| **Tools** | 18 MCP tools | Same 18 MCP tools |
+| **Performance** | Baseline | Identical |
+
+### Blocked Domains in the Official Extension
+
+| Category | Blocked Sites |
+|----------|--------------|
+| Banking | Chase, BofA, Wells Fargo, Citibank |
+| Investing/Brokerage | Schwab, Fidelity, Robinhood, E-Trade, Wealthfront, Betterment |
+| Payments/Transfers | PayPal, Venmo, Cash App, Zelle, Stripe, Square, Wise, Western Union, MoneyGram, Adyen, Checkout.com |
+| BNPL | Klarna, Affirm, Afterpay |
+| Neobanks/Fintech | SoFi, Chime, Mercury, Brex, Ramp |
+| Crypto | Coinbase, Binance, Kraken, MetaMask |
+| Gambling | DraftKings, FanDuel, Bet365, Bovada, PokerStars, BetMGM, Caesars |
+| Dating | Tinder, Bumble, Hinge, Match, OKCupid |
+| Adult | Pornhub, XVideos, XNXX |
+| News/Media | NYT, WSJ, Barron's, MarketWatch, Bloomberg, Reuters, Economist, Wired, Vogue |
+| Social Media | Reddit |
+
+Open Claude in Chrome has **none of these restrictions**.
 
 ## Architecture
 
 ```
-Claude Code ←stdio MCP→ mcp-server.js ←TCP→ native-host.js ←native messaging→ Chrome Extension
+Claude Code <--stdio MCP--> mcp-server.js <--TCP--> native-host.js <--native messaging--> Extension <--> Browser
 ```
 
 Three components:
-1. **Chrome Extension** — Manifest V3 extension with CDP-based browser automation
-2. **MCP Server** — Node.js process started by Claude Code, exposes 18 tools via MCP
+1. **Extension** — Manifest V3 with CDP-based browser automation (all 18 tools)
+2. **MCP Server** — Node.js process started by Claude Code, exposes tools via MCP
 3. **Native Messaging Host** — Bridge between the MCP server and the extension
-
-## Prerequisites
-
-- **Node.js** v18+
-- **Google Chrome**, **Microsoft Edge**, or **Brave Browser**
-- **Claude Code** v2.0.73+
 
 ## Installation
 
-### Step 1: Install npm dependencies
+### Prerequisites
+
+- **Node.js** v18+
+- **Any Chromium browser** (Chrome, Edge, Brave, Arc, Opera, Vivaldi, etc.)
+- **Claude Code** v2.0.73+
+
+### Step 1: Install dependencies
 
 ```bash
 cd host
@@ -29,36 +59,36 @@ npm install
 cd ..
 ```
 
-### Step 2: Load the extension in your browser
+### Step 2: Load the extension
 
-1. Open your browser and go to `chrome://extensions` (or `brave://extensions` / `edge://extensions`)
-2. Enable **Developer mode** (toggle in the top right)
-3. Click **Load unpacked**
-4. Select the `extension/` directory from this project
-5. The extension will appear with a name like "Unblocked Chrome for Claude"
-6. **Copy the extension ID** shown under the extension name (a long string like `abcdefghijklmnop...`)
+1. Go to `chrome://extensions` (or `brave://extensions` / `edge://extensions`)
+2. Enable **Developer mode**
+3. Click **Load unpacked** and select the `extension/` directory
+4. Copy the **extension ID** shown under the extension name
 
-### Step 3: Run the install script
+### Step 3: Register native messaging
 
 ```bash
 ./install.sh <your-extension-id>
 ```
 
-This registers the native messaging host for Chrome, Edge, and Brave. It creates:
-- A wrapper script at `host/native-host-wrapper.sh`
-- Native messaging host manifests in each browser's `NativeMessagingHosts/` directory
+If you use multiple browsers, pass all IDs:
+
+```bash
+./install.sh <chrome-id> <brave-id> <arc-id>
+```
 
 ### Step 4: Restart your browser
 
-Close **all** browser windows and reopen. Chrome reads native messaging host configs on startup.
+Close **all** windows and reopen. The browser reads native messaging host configs on startup.
 
-### Step 5: Add the MCP server to Claude Code
+### Step 5: Add to Claude Code
 
 ```bash
-claude mcp add unblocked-chrome -- node /absolute/path/to/host/mcp-server.js
+claude mcp add open-claude-in-chrome -- node /absolute/path/to/host/mcp-server.js
 ```
 
-Use the **absolute path** to `mcp-server.js`. You can find it with:
+Find the absolute path with:
 
 ```bash
 echo "node $(pwd)/host/mcp-server.js"
@@ -72,17 +102,11 @@ Start a new Claude Code session and test:
 Navigate to reddit.com and take a screenshot
 ```
 
-If everything is working, Claude will:
-1. Call `tabs_context_mcp` to get available tabs
-2. Call `tabs_create_mcp` to create a new tab
-3. Call `navigate` to go to reddit.com
-4. Call `computer` with action `screenshot`
-
-Reddit should load (no domain restriction).
+Reddit loads. No domain restriction.
 
 ## Available Tools
 
-All 18 tools match the Claude in Chrome API surface:
+All 18 tools, identical to Claude in Chrome:
 
 | Tool | Description |
 |------|-------------|
@@ -105,60 +129,43 @@ All 18 tools match the Claude in Chrome API surface:
 | `switch_browser` | Switch browser (stub) |
 | `update_plan` | Present plan (auto-approved) |
 
-## Differences from Claude in Chrome
-
-1. **No domain blocklist** — navigate to any URL
-2. **Brave Browser support** — native messaging registered for Brave
-3. **`find` tool** — uses text/attribute matching instead of nested LLM call
-4. **`gif_creator`** — stub (not implemented)
-5. **`shortcuts_*`** — stub (not implemented)
-6. **`update_plan`** — auto-approves (no permission dialog)
-
 ## Troubleshooting
 
 ### Extension not connecting
 
-1. Verify the extension is loaded and enabled in `chrome://extensions`
-2. Check that you ran `./install.sh` with the correct extension ID
+1. Verify the extension is loaded and enabled
+2. Check that `./install.sh` was run with the correct extension ID
 3. Restart the browser completely (all windows)
-4. Check the native messaging host manifest exists:
-   - **Chrome (macOS)**: `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.anthropic.unblocked_chrome.json`
-   - **Brave (macOS)**: `~/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/com.anthropic.unblocked_chrome.json`
-   - **Edge (macOS)**: `~/Library/Application Support/Microsoft Edge/NativeMessagingHosts/com.anthropic.unblocked_chrome.json`
+4. Verify the native messaging host manifest exists:
+   - **Chrome (macOS)**: `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.anthropic.open_claude_in_chrome.json`
+   - **Brave (macOS)**: `~/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/com.anthropic.open_claude_in_chrome.json`
+   - **Edge (macOS)**: `~/Library/Application Support/Microsoft Edge/NativeMessagingHosts/com.anthropic.open_claude_in_chrome.json`
 
 ### MCP server not found
 
-Make sure you used an absolute path when adding the MCP:
+Use an absolute path:
 ```bash
-claude mcp add unblocked-chrome -- node /absolute/path/to/host/mcp-server.js
+claude mcp add open-claude-in-chrome -- node /absolute/path/to/host/mcp-server.js
 ```
 
-### "Browser extension is not connected" error
+### "Browser extension is not connected"
 
-This means the MCP server started but the native host hasn't connected yet. The native host is launched by Chrome when the extension's service worker starts. Try:
-1. Open any webpage in the browser (this wakes the service worker)
-2. Check the extension's service worker logs in `chrome://extensions` → "Inspect views: service worker"
-3. Verify the native host wrapper exists: `host/native-host-wrapper.sh`
-
-### Tools timing out
-
-The default timeout is 60 seconds. For long operations (slow page loads, complex screenshots), this may not be enough. The MCP server will return a timeout error — retry the operation.
+The MCP server started but the native host hasn't connected. Try:
+1. Open any webpage (wakes the service worker)
+2. Check service worker logs: `chrome://extensions` > "Inspect views: service worker"
+3. Verify `host/native-host-wrapper.sh` exists
 
 ### Port conflict
 
-The MCP server and native host communicate on TCP port 18765. If this conflicts:
-1. Create `~/.config/unblocked-chrome/config.json`:
+Default port is 18765. To change:
+1. Create `~/.config/open-claude-in-chrome/config.json`:
    ```json
    { "port": 19000 }
    ```
-2. Restart both the browser and Claude Code
+2. Restart browser and Claude Code
 
-## How It Works
+## License
 
-1. **Claude Code** starts `mcp-server.js` as a stdio MCP server
-2. The MCP server opens a TCP listener on `127.0.0.1:18765`
-3. The **Chrome extension**'s service worker calls `chrome.runtime.connectNative()`, which launches `native-host.js`
-4. The native host connects to the MCP server's TCP port
-5. When Claude sends a tool call, it flows: Claude Code → MCP (stdio) → TCP → native messaging → extension
-6. The extension executes the tool using Chrome APIs (CDP for mouse/keyboard/screenshots, content scripts for DOM)
-7. Results flow back the same path
+MIT
+
+Built by [Sebastian Sosa](https://github.com/CakeCrusher) ([Noemica](https://noemica.io))

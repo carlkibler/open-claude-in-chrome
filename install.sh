@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Install script for Unblocked Chrome extension.
+# Install script for Open Claude in Chrome extension.
 # Registers the native messaging host for Chrome, Edge, and Brave.
 #
 # Usage: ./install.sh <extension-id> [extension-id-2] [extension-id-3] ...
@@ -30,7 +30,7 @@ EXTENSION_IDS=("$@")
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOST_DIR="$SCRIPT_DIR/host"
 NATIVE_HOST_PATH="$HOST_DIR/native-host-wrapper.sh"
-HOST_NAME="com.anthropic.unblocked_chrome"
+HOST_NAME="com.anthropic.open_claude_in_chrome"
 
 # Verify node is available
 if ! command -v node &> /dev/null; then
@@ -68,7 +68,7 @@ generate_manifest() {
   cat << EOF
 {
   "name": "$HOST_NAME",
-  "description": "Unblocked Chrome Native Messaging Host",
+  "description": "Open Claude in Chrome Native Messaging Host",
   "path": "$NATIVE_HOST_PATH",
   "type": "stdio",
   "allowed_origins": [$ORIGINS
@@ -126,7 +126,7 @@ echo ""
 echo "  1. Restart your browser (close all windows and reopen)"
 echo "  2. Add the MCP server to Claude Code:"
 echo ""
-echo "     claude mcp add unblocked-chrome -- node $HOST_DIR/mcp-server.js"
+echo "     claude mcp add open-claude-in-chrome -- node $HOST_DIR/mcp-server.js"
 echo ""
 echo "  3. Start a new Claude Code session and test:"
 echo ""

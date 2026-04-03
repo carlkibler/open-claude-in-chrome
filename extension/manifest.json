@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Unblocked Chrome for Claude",
+  "name": "Open Claude in Chrome",
   "version": "1.0.0",
-  "description": "Browser automation MCP tools for Claude Code — no domain restrictions",
+  "description": "Claude in Chrome, open source. No domain blocklist. Any Chromium browser.",
   "minimum_chrome_version": "116",
   "permissions": [
     "tabs",

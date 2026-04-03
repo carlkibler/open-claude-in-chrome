@@ -1,4 +1,4 @@
-// Content script for Unblocked Chrome extension.
+// Content script for Open Claude in Chrome extension.
 // Injected into every page. Provides:
 // - Accessibility tree generation (read_page)
 // - Element ref mapping with WeakRef (persistent across calls)

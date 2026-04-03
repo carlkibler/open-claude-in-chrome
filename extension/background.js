@@ -1,4 +1,4 @@
-// Background service worker for Unblocked Chrome extension.
+// Background service worker for Open Claude in Chrome extension.
 // Handles: native messaging, CDP via chrome.debugger, tool dispatch, tab group management.
 
 // Prevent unhandled rejections from killing the service worker
@@ -6,7 +6,7 @@ self.addEventListener("unhandledrejection", (event) => {
   event.preventDefault();
 });
 
-const NATIVE_HOST_NAME = "com.anthropic.unblocked_chrome";
+const NATIVE_HOST_NAME = "com.anthropic.open_claude_in_chrome";
 
 // --- State ---
 let nativePort = null;

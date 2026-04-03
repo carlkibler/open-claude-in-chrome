@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Native Messaging Host for Unblocked Chrome extension.
+// Native Messaging Host for Open Claude in Chrome extension.
 // Launched by Chrome when the extension calls connectNative().
 // Bridges between Chrome native messaging (stdin/stdout, 4-byte LE length prefix + JSON)
 // and the MCP server (TCP on localhost).
@@ -16,7 +16,7 @@ function getPort() {
   const configPath = path.join(
     os.homedir(),
     ".config",
-    "unblocked-chrome",
+    "open-claude-in-chrome",
     "config.json"
   );
   try {
