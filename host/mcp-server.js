@@ -2,8 +2,12 @@
 
 // MCP Server for Open Claude in Chrome extension.
 // Started by Claude Code via stdio MCP transport.
-// Also runs a TCP server for the native messaging host to connect.
-// Bridges MCP tool calls to the Chrome extension and returns results.
+//
+// Operates in one of two modes:
+// - PRIMARY: Owns the TCP port, accepts native host + client connections
+// - CLIENT: Port already taken by another session, connects as a client
+//
+// This allows multiple Claude Code sessions to share one browser extension.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -26,174 +30,216 @@ function getPort() {
   }
 }
 
-// --- TCP bridge to native host ---
+const TCP_PORT = getPort();
 
+// --- Mode detection ---
+// Try to bind the port. If it's taken, switch to client mode.
+let mode = "primary"; // or "client"
+
+// --- Shared state ---
 let nativeHostSocket = null;
-const pendingRequests = new Map(); // id -> { resolve, reject, timer }
+const pendingRequests = new Map(); // id -> { resolve, reject, timer, tool, args, resent }
 let requestIdCounter = 0;
+
+// Primary mode: track client MCP server connections
+const clientSockets = new Map(); // clientId -> socket
+let clientIdCounter = 0;
+// Map from prefixed request ID -> { clientId, originalId }
+const clientRequestMap = new Map();
+
+// Client mode: TCP connection to the primary
+let primarySocket = null;
+let clientBuffer = Buffer.alloc(0);
+
+// --- sendToExtension: works in both modes ---
 
 function sendToExtension(tool, args) {
   return new Promise((resolve, reject) => {
-    if (!nativeHostSocket || nativeHostSocket.destroyed) {
-      reject(new Error("Browser extension is not connected. Make sure a supported Chromium browser is running with the Open Claude in Chrome extension installed and enabled."));
-      return;
-    }
     const id = String(++requestIdCounter);
     const timer = setTimeout(() => {
       pendingRequests.delete(id);
       reject(new Error("Tool request timed out after 60s"));
     }, 60000);
     pendingRequests.set(id, { resolve, reject, timer, tool, args, resent: false });
-    const msg = JSON.stringify({ id, type: "tool_request", tool, args }) + "\n";
-    const ok = nativeHostSocket.write(msg);
-    if (!ok) {
-      // Socket buffer full or broken — wait for drain or error
-      nativeHostSocket.once("error", () => {
-        if (pendingRequests.has(id)) {
-          clearTimeout(timer);
-          pendingRequests.delete(id);
-          reject(new Error("Browser extension connection lost while sending request."));
-        }
-      });
+
+    if (mode === "primary") {
+      if (!nativeHostSocket || nativeHostSocket.destroyed) {
+        clearTimeout(timer);
+        pendingRequests.delete(id);
+        reject(new Error("Browser extension is not connected. Make sure a supported Chromium browser is running with the Open Claude in Chrome extension installed and enabled."));
+        return;
+      }
+      const msg = JSON.stringify({ id, type: "tool_request", tool, args }) + "\n";
+      nativeHostSocket.write(msg);
+    } else {
+      // Client mode: send to primary server
+      if (!primarySocket || primarySocket.destroyed) {
+        clearTimeout(timer);
+        pendingRequests.delete(id);
+        reject(new Error("Lost connection to primary MCP server."));
+        return;
+      }
+      const msg = JSON.stringify({ id, type: "tool_request", tool, args }) + "\n";
+      primarySocket.write(msg);
     }
   });
 }
 
-const TCP_PORT = getPort();
+// --- Pidfile management ---
 
-// Write a pidfile so we can detect stale servers
 const pidfilePath = path.join(os.tmpdir(), `open-claude-in-chrome-mcp-${TCP_PORT}.pid`);
 
-async function killStaleServer() {
-  // Strategy 1: kill the PID in the pidfile
-  try {
-    const oldPid = parseInt(fs.readFileSync(pidfilePath, "utf-8").trim(), 10);
-    if (oldPid && oldPid !== process.pid) {
-      try {
-        process.kill(oldPid, 0); // Check if alive
-        process.kill(oldPid, "SIGTERM"); // Kill it
-        await new Promise((r) => setTimeout(r, 500));
-      } catch {
-        // Process already dead
-      }
-    }
-  } catch {
-    // No pidfile
-  }
-
-  // Strategy 2: kill whatever is actually holding the port.
-  // This catches orphaned processes from old installs (different pidfile name, etc).
-  try {
-    const { execSync } = await import("node:child_process");
-    const lsof = execSync(`lsof -ti :${TCP_PORT}`, { encoding: "utf-8" }).trim();
-    if (lsof) {
-      for (const pidStr of lsof.split("\n")) {
-        const pid = parseInt(pidStr, 10);
-        if (pid && pid !== process.pid) {
-          try { process.kill(pid, "SIGTERM"); } catch {}
-        }
-      }
-      await new Promise((r) => setTimeout(r, 500));
-    }
-  } catch {
-    // lsof failed or no process on port — fine
-  }
-}
-
 function writePidfile() {
-  try {
-    fs.writeFileSync(pidfilePath, String(process.pid));
-  } catch {
-    // Non-fatal
-  }
+  try { fs.writeFileSync(pidfilePath, String(process.pid)); } catch {}
 }
 
 function cleanupPidfile() {
   try {
     const content = fs.readFileSync(pidfilePath, "utf-8").trim();
     if (content === String(process.pid)) fs.unlinkSync(pidfilePath);
-  } catch {
-    // Non-fatal
-  }
+  } catch {}
 }
 
 function shutdown() {
-  cleanupPidfile();
+  if (mode === "primary") cleanupPidfile();
   if (nativeHostSocket && !nativeHostSocket.destroyed) nativeHostSocket.destroy();
-  for (const [id, { reject, timer }] of pendingRequests) {
+  if (primarySocket && !primarySocket.destroyed) primarySocket.destroy();
+  for (const [, sock] of clientSockets) {
+    if (!sock.destroyed) sock.destroy();
+  }
+  for (const [, { reject, timer }] of pendingRequests) {
     clearTimeout(timer);
     reject(new Error("Server shutting down"));
   }
   pendingRequests.clear();
-  tcpServer.close();
+  if (mode === "primary") tcpServer.close();
   process.exit(0);
 }
 
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 process.on("SIGHUP", shutdown);
-// When parent process (Claude Code) dies, stdin closes
 process.stdin.on("end", shutdown);
-process.stdin.resume(); // Ensure 'end' fires even though StdioServerTransport also reads
+process.stdin.resume();
+
+// --- Primary mode: handle incoming TCP connections ---
+
+function handleResponse(msg) {
+  // Check if this response is for a client request (prefixed ID)
+  if (msg.id && clientRequestMap.has(msg.id)) {
+    const { clientId, originalId } = clientRequestMap.get(msg.id);
+    clientRequestMap.delete(msg.id);
+    const clientSocket = clientSockets.get(clientId);
+    if (clientSocket && !clientSocket.destroyed) {
+      const fwd = JSON.stringify({ ...msg, id: originalId }) + "\n";
+      clientSocket.write(fwd);
+    }
+    return;
+  }
+
+  // Otherwise it's for a local request
+  if (msg.id && pendingRequests.has(msg.id)) {
+    const { resolve, reject, timer } = pendingRequests.get(msg.id);
+    clearTimeout(timer);
+    pendingRequests.delete(msg.id);
+    if (msg.type === "tool_error") {
+      reject(new Error(msg.error || "Tool execution failed"));
+    } else {
+      resolve(msg.result);
+    }
+  }
+}
+
+function processLine(line) {
+  if (!line) return;
+  try {
+    const msg = JSON.parse(line);
+    if (msg.type === "heartbeat") return;
+    handleResponse(msg);
+  } catch {}
+}
 
 const tcpServer = net.createServer((socket) => {
-  // Reject new connections if we already have an active one.
-  // This prevents multiple browser profiles from fighting over the connection.
+  // Classification: wait briefly for a client_hello. If none arrives, treat as native host.
+  // Native hosts (launched by the browser) don't send data immediately on connect.
+  // Client MCP servers send client_hello immediately.
+  let classified = false;
+  let earlyBuffer = Buffer.alloc(0);
+
+  const classifyTimeout = setTimeout(() => {
+    if (!classified) {
+      classified = true;
+      setupNativeHostConnection(socket, earlyBuffer);
+    }
+  }, 500); // 500ms is plenty for a local client_hello
+
+  socket.on("data", function onEarlyData(chunk) {
+    if (classified) return; // Already classified, data handler was replaced
+    earlyBuffer = Buffer.concat([earlyBuffer, chunk]);
+    const newlineIdx = earlyBuffer.indexOf(10);
+    if (newlineIdx === -1) return; // No full line yet, keep buffering
+
+    const firstLine = earlyBuffer.subarray(0, newlineIdx).toString("utf-8").trim();
+    try {
+      const firstMsg = JSON.parse(firstLine);
+      if (firstMsg.type === "client_hello") {
+        classified = true;
+        clearTimeout(classifyTimeout);
+        socket.removeListener("data", onEarlyData);
+        setupClientConnection(socket, earlyBuffer.subarray(newlineIdx + 1));
+        return;
+      }
+    } catch {}
+
+    // Got data but it's not a client_hello, this is a native host
+    classified = true;
+    clearTimeout(classifyTimeout);
+    socket.removeListener("data", onEarlyData);
+    setupNativeHostConnection(socket, earlyBuffer);
+  });
+});
+
+function setupNativeHostConnection(socket, initialBuffer) {
   if (nativeHostSocket && !nativeHostSocket.destroyed) {
-    socket.end(JSON.stringify({ type: "error", error: "Another browser profile is already connected. Disable the extension in other profiles." }) + "\n");
+    // Already have a native host. Reject.
+    socket.end(JSON.stringify({ type: "error", error: "Another browser profile is already connected." }) + "\n");
     socket.destroy();
     return;
   }
+
   nativeHostSocket = socket;
-  let buffer = Buffer.alloc(0);
+  let buffer = initialBuffer;
+
+  // Process any data already in the buffer
+  let idx;
+  while ((idx = buffer.indexOf(10)) !== -1) {
+    processLine(buffer.subarray(0, idx).toString("utf-8").trim());
+    buffer = buffer.subarray(idx + 1);
+  }
 
   socket.on("data", (chunk) => {
     buffer = Buffer.concat([buffer, chunk]);
     let newlineIdx;
     while ((newlineIdx = buffer.indexOf(10)) !== -1) {
-      const line = buffer.subarray(0, newlineIdx).toString("utf-8").trim();
+      processLine(buffer.subarray(0, newlineIdx).toString("utf-8").trim());
       buffer = buffer.subarray(newlineIdx + 1);
-      if (!line) continue;
-      try {
-        const msg = JSON.parse(line);
-        if (msg.type === "heartbeat") continue; // Ignore heartbeats
-        if (msg.id && pendingRequests.has(msg.id)) {
-          const { resolve, reject, timer } = pendingRequests.get(msg.id);
-          clearTimeout(timer);
-          pendingRequests.delete(msg.id);
-          if (msg.type === "tool_error") {
-            reject(new Error(msg.error || "Tool execution failed"));
-          } else {
-            resolve(msg.result);
-          }
-        }
-      } catch {
-        // skip malformed
-      }
     }
   });
 
-  socket.on("error", () => {
-    nativeHostSocket = null;
-  });
+  socket.on("error", () => { nativeHostSocket = null; });
 
   socket.on("close", () => {
     if (nativeHostSocket === socket) nativeHostSocket = null;
-    // Wait briefly for a new connection before rejecting pending requests.
-    // The extension's service worker may restart and reconnect within seconds.
     if (pendingRequests.size > 0) {
       setTimeout(() => {
-        // If a new connection arrived and we can resend, do so
         if (nativeHostSocket && !nativeHostSocket.destroyed) {
           for (const [id, entry] of pendingRequests) {
             if (entry.resent) continue;
             entry.resent = true;
-            const msg = JSON.stringify({ id, type: "tool_request", tool: entry.tool, args: entry.args }) + "\n";
-            nativeHostSocket.write(msg);
+            nativeHostSocket.write(JSON.stringify({ id, type: "tool_request", tool: entry.tool, args: entry.args }) + "\n");
           }
         } else {
-          // No reconnection — reject everything
-          for (const [id, { reject, timer }] of pendingRequests) {
+          for (const [, { reject, timer }] of pendingRequests) {
             clearTimeout(timer);
             reject(new Error("Native host disconnected"));
           }
@@ -202,24 +248,170 @@ const tcpServer = net.createServer((socket) => {
       }, 5000);
     }
   });
-});
+}
 
-// Kill any stale server, then bind
-await killStaleServer();
+function setupClientConnection(socket, initialBuffer) {
+  const clientId = String(++clientIdCounter);
+  clientSockets.set(clientId, socket);
+  process.stderr.write(`Client MCP server connected (client ${clientId})\n`);
 
-tcpServer.on("error", (err) => {
-  if (err.code === "EADDRINUSE") {
-    process.stderr.write(`Port ${TCP_PORT} still in use after killing stale server. Retrying...\n`);
-    setTimeout(() => {
-      tcpServer.close();
-      tcpServer.listen(TCP_PORT, "127.0.0.1");
-    }, 1000);
+  // Send ack
+  socket.write(JSON.stringify({ type: "client_ack", clientId }) + "\n");
+
+  let buffer = initialBuffer;
+
+  function processClientData() {
+    let idx;
+    while ((idx = buffer.indexOf(10)) !== -1) {
+      const line = buffer.subarray(0, idx).toString("utf-8").trim();
+      buffer = buffer.subarray(idx + 1);
+      if (!line) continue;
+      try {
+        const msg = JSON.parse(line);
+        if (msg.type === "tool_request" && msg.id) {
+          // Forward to native host with a prefixed ID
+          const prefixedId = `c${clientId}_${msg.id}`;
+          clientRequestMap.set(prefixedId, { clientId, originalId: msg.id });
+
+          if (!nativeHostSocket || nativeHostSocket.destroyed) {
+            // Send error back to client
+            socket.write(JSON.stringify({ id: msg.id, type: "tool_error", error: "Browser extension is not connected." }) + "\n");
+            clientRequestMap.delete(prefixedId);
+          } else {
+            nativeHostSocket.write(JSON.stringify({ ...msg, id: prefixedId }) + "\n");
+          }
+        }
+      } catch {}
+    }
   }
-});
 
-tcpServer.listen(TCP_PORT, "127.0.0.1", () => {
-  writePidfile();
-});
+  // Process initial buffer
+  processClientData();
+
+  socket.on("data", (chunk) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    processClientData();
+  });
+
+  socket.on("error", () => {});
+  socket.on("close", () => {
+    clientSockets.delete(clientId);
+    // Clean up any pending client requests
+    for (const [prefixedId, info] of clientRequestMap) {
+      if (info.clientId === clientId) clientRequestMap.delete(prefixedId);
+    }
+    process.stderr.write(`Client MCP server disconnected (client ${clientId})\n`);
+  });
+}
+
+// --- Client mode: connect to primary ---
+
+function startClientMode() {
+  mode = "client";
+  process.stderr.write(`Port ${TCP_PORT} in use. Connecting as client to primary MCP server...\n`);
+
+  function connect() {
+    primarySocket = net.createConnection(TCP_PORT, "127.0.0.1", () => {
+      process.stderr.write(`Connected to primary MCP server on :${TCP_PORT}\n`);
+      // Send handshake
+      primarySocket.write(JSON.stringify({ type: "client_hello" }) + "\n");
+    });
+
+    primarySocket.on("data", (chunk) => {
+      clientBuffer = Buffer.concat([clientBuffer, chunk]);
+      let idx;
+      while ((idx = clientBuffer.indexOf(10)) !== -1) {
+        const line = clientBuffer.subarray(0, idx).toString("utf-8").trim();
+        clientBuffer = clientBuffer.subarray(idx + 1);
+        if (!line) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.type === "client_ack") continue;
+          if (msg.type === "error") {
+            process.stderr.write(`Primary server error: ${msg.error}\n`);
+            continue;
+          }
+          // Tool response routed back from primary
+          if (msg.id && pendingRequests.has(msg.id)) {
+            const { resolve, reject, timer } = pendingRequests.get(msg.id);
+            clearTimeout(timer);
+            pendingRequests.delete(msg.id);
+            if (msg.type === "tool_error") {
+              reject(new Error(msg.error || "Tool execution failed"));
+            } else {
+              resolve(msg.result);
+            }
+          }
+        } catch {}
+      }
+    });
+
+    primarySocket.on("error", (err) => {
+      process.stderr.write(`Client connection error: ${err.message}\n`);
+    });
+
+    primarySocket.on("close", () => {
+      primarySocket = null;
+      // Primary died, reject pending requests
+      for (const [, { reject, timer }] of pendingRequests) {
+        clearTimeout(timer);
+        reject(new Error("Primary MCP server disconnected"));
+      }
+      pendingRequests.clear();
+      // Try to reconnect after a delay (primary might restart)
+      setTimeout(connect, 2000);
+    });
+  }
+
+  connect();
+}
+
+// --- Startup: try primary, fall back to client ---
+
+async function start() {
+  // Clean up stale pidfiles (but don't kill live servers)
+  const pidfiles = [
+    pidfilePath,
+    path.join(os.tmpdir(), `unblocked-chrome-mcp-${TCP_PORT}.pid`),
+  ];
+  for (const pf of pidfiles) {
+    try {
+      const oldPid = parseInt(fs.readFileSync(pf, "utf-8").trim(), 10);
+      if (oldPid && oldPid !== process.pid) {
+        try {
+          process.kill(oldPid, 0); // Check if alive
+          // It's alive. DON'T kill it. We'll run as client instead.
+        } catch {
+          // Dead process, clean up pidfile
+          try { fs.unlinkSync(pf); } catch {}
+        }
+      }
+    } catch {}
+  }
+
+  // Try to bind the port
+  return new Promise((resolve) => {
+    tcpServer.once("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        // Port taken by another live session. Run as client.
+        startClientMode();
+        resolve();
+      } else {
+        process.stderr.write(`TCP server error: ${err.message}\n`);
+        process.exit(1);
+      }
+    });
+
+    tcpServer.listen(TCP_PORT, "127.0.0.1", () => {
+      mode = "primary";
+      writePidfile();
+      process.stderr.write(`Primary MCP server listening on :${TCP_PORT}\n`);
+      resolve();
+    });
+  });
+}
+
+await start();
 
 // --- Helper to wrap tool results for MCP ---
 
@@ -238,7 +430,6 @@ function mixedResult(parts) {
 async function callTool(toolName, args) {
   try {
     const result = await sendToExtension(toolName, args);
-    // Result from extension can be a string, object with content array, or raw data
     if (typeof result === "string") return textResult(result);
     if (result && result.content) return result;
     return textResult(JSON.stringify(result, null, 2));
@@ -254,16 +445,11 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
-// Pre-validation arg coercion: fix common Claude mistakes before zod sees them.
-// The schema advertises z.number() for tabId (matching the official extension),
-// but Claude sometimes sends strings or serializes arrays as strings.
-// We wrap every setRequestHandler call so that any handler receiving a request
-// with params.arguments gets those arguments coerced before zod validation.
+// Pre-validation arg coercion
 {
   const origSetRequestHandler = server.server.setRequestHandler.bind(server.server);
   server.server.setRequestHandler = function(schema, handler) {
     return origSetRequestHandler(schema, async (request, extra) => {
-      // Coerce tool call arguments if present
       const args = request?.params?.arguments;
       if (args) {
         if (typeof args.tabId === "string") args.tabId = Number(args.tabId);
@@ -281,7 +467,6 @@ const server = new McpServer({
     });
   };
 }
-
 // 1. tabs_context_mcp
 server.tool(
   "tabs_context_mcp",
